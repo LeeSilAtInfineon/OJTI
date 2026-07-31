@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 from bs4 import BeautifulSoup
 
@@ -11,23 +12,15 @@ handlers_folder   = os.path.join(output_folder, "Handlers")
 automation_folder = os.path.join(output_folder, "Automation")
 other_folder      = os.path.join(output_folder, "Other")
 
-for folder in [output_folder, testers_folder, handlers_folder,
-               automation_folder, other_folder]:
+for folder in [output_folder, testers_folder, handlers_folder, automation_folder, other_folder]:
     os.makedirs(folder, exist_ok=True)
 
 excel_path = r"C:\\Users\\leesil\\Python Projects\\Git Branch\\Master\\OJTI\\export.xlsx"
 
+# CHANGED: Moved EXAScale to the front of tester_names so it matches BEFORE V93K
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
-tester_names       = ["V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "EXAScale", "J750"]
+tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT", "Rasco"]
-ibis_names         = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
-keywords_logistics = ["DPLP", "Subcon", "Shipping"]
-equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Despatch", "Peel Force Tester"]
-
-all_exclusion_keywords = (
-    automation_names + tester_names + handler_names +
-    ibis_names + keywords_logistics + equipment_names
-)
 
 keywords = tester_names + handler_names + automation_names
 
@@ -42,6 +35,21 @@ SKILL_ROLE = {
 
 def level_role_label(i: int) -> str:
     return f"Level {i} ({SKILL_ROLE.get(i, '')})"
+
+def norm(s: str) -> str:
+    """Normalize string for matching: uppercase and remove spaces/hyphens/underscores."""
+    return re.sub(r"[\s\-_]+", "", str(s).upper())
+
+# Flexible skill level extraction
+SKILL_RE = re.compile(r"skill\s*level\s*[:\-]?\s*(\d)", re.IGNORECASE)
+
+def extract_skill_level(text: str):
+    """Return int skill level 1..6 if found, else None."""
+    m = SKILL_RE.search(str(text))
+    if not m:
+        return None
+    lvl = int(m.group(1))
+    return lvl if 1 <= lvl <= 6 else None
 
 # ==========================================
 # 2. LOAD DATA
@@ -67,11 +75,10 @@ keyword_lists = {
 }
 other_lists = {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
 
-# Track which links already went into Testers/Handlers/Automation
 matched_links = set()
 
 print("🔄 Processing data...")
-total_processed  = 0
+total_processed   = 0
 debug_other_added = 0
 
 for row in data:
@@ -85,8 +92,12 @@ for row in data:
     if not value.strip() or not link.strip():
         continue
 
-    value_upper = value.upper()
-    value_lower = value.lower()
+    lvl = extract_skill_level(value)
+    if lvl is None:
+        continue
+    i = lvl
+
+    value_norm = norm(value)
 
     entry = (
         f"{value} - "
@@ -94,38 +105,39 @@ for row in data:
         f"target='_blank'>{link}</a>"
     )
 
-    for i in range(1, 7):
-        if f"(Skill Level {i})" not in value:
-            continue
+    matched_specific = False
 
-        matched_specific = False
-
-        # 1) Testers / Handlers / Automation
-        #    No column filter - matches all rows
-        for kw in keywords:
-            if kw.upper() in value_upper:
-                keyword_lists[kw][f"Skill Level {i}"]["list"].append(entry)
-                keyword_lists[kw][f"Skill Level {i}"]["count"] += 1
-                total_processed += 1
-                matched_specific = True
-                matched_links.add(link)
-                break
-
-        if matched_specific:
-            continue
-
-        # 2) Other
-        #    col6 must contain "testing" AND not already matched to specific keyword
-        if "testing" in col6.lower() and link not in matched_links:
-            other_lists[f"Skill Level {i}"]["list"].append(entry)
-            other_lists[f"Skill Level {i}"]["count"] += 1
+    # 1) Match Testers / Handlers / Automation
+    # Because EXAScale is now first in tester_names, it will match before V93K
+    for kw in keywords:
+        if norm(kw) in value_norm:
+            keyword_lists[kw][f"Skill Level {i}"]["list"].append(entry)
+            keyword_lists[kw][f"Skill Level {i}"]["count"] += 1
             total_processed += 1
-            debug_other_added += 1
+            matched_specific = True
+            matched_links.add(link)
+            break
+
+    if matched_specific:
+        continue
+
+    # 2) Other: col6 must contain "testing" and not matched
+    if "testing" in col6.lower() and link not in matched_links:
+        other_lists[f"Skill Level {i}"]["list"].append(entry)
+        other_lists[f"Skill Level {i}"]["count"] += 1
+        total_processed += 1
+        debug_other_added += 1
 
 total_other = sum(other_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
 
 print(f"✅ Total entries processed : {total_processed}")
 print(f"📌 Other total             : {total_other}")
+print(f"➕ Added to Other          : {debug_other_added}")
+
+print("\n📊 Keyword counts:")
+for kw in keywords:
+    c = sum(keyword_lists[kw][f"Skill Level {i}"]["count"] for i in range(1, 7))
+    print(f"   {kw:<20} : {c}")
 
 # ==========================================
 # 4. CSS DEFINITIONS
@@ -203,7 +215,6 @@ html_master += "</div></div></div></div></body></html>"
 
 with open(os.path.join(output_folder, "FinalTest.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_master, "html.parser").prettify())
-print(f"✅ Written: FinalTest.html")
 
 # --- TESTER LIST VIEW ---
 html_tester_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Testers</div><div class='main-content'><div class='post-it-container'>"
@@ -212,7 +223,6 @@ for t in tester_names:
 html_tester_view += "</div></div></div></div></body></html>"
 with open(os.path.join(testers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_tester_view, "html.parser").prettify())
-print(f"✅ Written: Testers/view.html")
 
 # --- HANDLER LIST VIEW ---
 html_handler_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Handlers</div><div class='main-content'><div class='post-it-container'>"
@@ -222,7 +232,6 @@ for h in handler_names:
 html_handler_view += "</div></div></div></div></body></html>"
 with open(os.path.join(handlers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_handler_view, "html.parser").prettify())
-print(f"✅ Written: Handlers/view.html")
 
 # --- AUTOMATION LIST VIEW ---
 html_auto_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Automation</div><div class='main-content'><div class='post-it-container'>"
@@ -232,14 +241,12 @@ for a in automation_names:
 html_auto_view += "</div></div></div></div></body></html>"
 with open(os.path.join(automation_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_auto_view, "html.parser").prettify())
-print(f"✅ Written: Automation/view.html")
 
 # --- TESTER DETAIL PAGES ---
 for t in tester_names:
     write_detail_page(t, "view.html", keyword_lists[t],
                       os.path.join(testers_folder, f"{t}.html"),
                       "No documents found for this Tester.")
-print("✅ Written: All Tester detail pages")
 
 # --- HANDLER DETAIL PAGES ---
 for h in handler_names:
@@ -247,7 +254,6 @@ for h in handler_names:
     write_detail_page(h, "view.html", keyword_lists[h],
                       os.path.join(handlers_folder, f"{safe_name}.html"),
                       "No documents found for this Handler.")
-print("✅ Written: All Handler detail pages")
 
 # --- AUTOMATION DETAIL PAGES ---
 for a in automation_names:
@@ -255,15 +261,10 @@ for a in automation_names:
     write_detail_page(a, "view.html", keyword_lists[a],
                       os.path.join(automation_folder, f"{safe_name}.html"),
                       "No documents found for this Automation Equipment.")
-print("✅ Written: All Automation detail pages")
 
 # --- OTHER PAGE ---
 write_detail_page("Other", "../FinalTest.html", other_lists,
                   os.path.join(other_folder, "view.html"),
                   "No documents found for Other.")
-print("✅ Written: Other/view.html")
 
-print("\n✅ Done.")
-print("\n📋 Logic Summary:")
-print("   Testers/Handlers/Automation : matched by keyword, NO column filter")
-print("   Other                       : col6 contains 'testing' + NOT matched to specific keyword")
+print("\n✅ HTML generated.")
