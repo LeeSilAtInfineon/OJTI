@@ -26,7 +26,7 @@ keywords = tester_names + handler_names + automation_names
 
 SKILL_ROLE = {
     1: "Operator",
-    2: "Operator",
+    2: "Operator/Technician",
     3: "Technician",
     4: "Technician",
     5: "Technician",
