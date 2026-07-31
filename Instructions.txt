@@ -1,0 +1,2 @@
+1) Unzip File
+2) Go to Index.HTML 
