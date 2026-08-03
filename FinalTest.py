@@ -10,9 +10,11 @@ output_folder     = "Final Test"
 testers_folder    = os.path.join(output_folder, "Testers")
 handlers_folder   = os.path.join(output_folder, "Handlers")
 automation_folder = os.path.join(output_folder, "Automation")
-other_folder      = os.path.join(output_folder, "Other")
 
-for folder in [output_folder, testers_folder, handlers_folder, automation_folder, other_folder]:
+# CHANGED: "Other" -> "General"
+general_folder    = os.path.join(output_folder, "General")
+
+for folder in [output_folder, testers_folder, handlers_folder, automation_folder, general_folder]:
     os.makedirs(folder, exist_ok=True)
 
 excel_path = r"C:\\Users\\leesil\\Python Projects\\Git Branch\\Master\\OJTI\\export.xlsx"
@@ -73,12 +75,16 @@ keyword_lists = {
     name: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for name in keywords
 }
-other_lists = {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
+
+# CHANGED: other_lists -> general_lists
+general_lists = {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
 
 matched_links = set()
 
 print("🔄 Processing data...")
 total_processed   = 0
+
+# (kept name; optional to rename, but not required)
 debug_other_added = 0
 
 for row in data:
@@ -121,18 +127,18 @@ for row in data:
     if matched_specific:
         continue
 
-    # 2) Other: col6 must contain "testing" and not matched
+    # 2) General: col6 must contain "testing" and not matched
     if "testing" in col6.lower() and link not in matched_links:
-        other_lists[f"Skill Level {i}"]["list"].append(entry)
-        other_lists[f"Skill Level {i}"]["count"] += 1
+        general_lists[f"Skill Level {i}"]["list"].append(entry)
+        general_lists[f"Skill Level {i}"]["count"] += 1
         total_processed += 1
         debug_other_added += 1
 
-total_other = sum(other_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
+total_general = sum(general_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
 
 print(f"✅ Total entries processed : {total_processed}")
-print(f"📌 Other total             : {total_other}")
-print(f"➕ Added to Other          : {debug_other_added}")
+print(f"📌 General total           : {total_general}")
+print(f"➕ Added to General         : {debug_other_added}")
 
 print("\n📊 Keyword counts:")
 for kw in keywords:
@@ -185,6 +191,7 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
     html += f"<div class='header'><h1>{title}</h1>"
     html += f"<a href='{back_href}' class='back-btn header-btn'>← Back</a></div>"
     html += f"<table class='data-table'>{LEVEL_HEADER}"
+
     rows_found = False
     for i in range(1, 7):
         entries = skill_dict[f"Skill Level {i}"]["list"]
@@ -194,9 +201,12 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
                 f"<tr><td class='skill-level'>{level_role_label(i)}</td>"
                 f"<td class='data-cell'>{'<br/><br/>'.join(entries)}</td></tr>"
             )
+
     if not rows_found:
         html += f"<tr><td class='skill-level' colspan='2'>{empty_msg}</td></tr>"
+
     html += "</table></body></html>"
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(BeautifulSoup(html, "html.parser").prettify())
 
@@ -210,7 +220,10 @@ html_master += "<div class='main-content'><div class='post-it-container'>"
 html_master += "<div class='post-it'><a href='Testers/view.html'>Tester</a></div>"
 html_master += "<div class='post-it'><a href='Handlers/view.html'>Handler</a></div>"
 html_master += "<div class='post-it'><a href='Automation/view.html'>Automation</a></div>"
-html_master += "<div class='post-it'><a href='Other/view.html'>Other</a></div>"
+
+# CHANGED: Other -> General
+html_master += "<div class='post-it'><a href='General/view.html'>General</a></div>"
+
 html_master += "</div></div></div></div></body></html>"
 
 with open(os.path.join(output_folder, "FinalTest.html"), "w", encoding="utf-8") as f:
@@ -221,6 +234,7 @@ html_tester_view = f"<html><head><style>{dashboard_css}</style></head><body><div
 for t in tester_names:
     html_tester_view += f"<div class='post-it'><a href='{t}.html'>{t}</a></div>"
 html_tester_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(testers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_tester_view, "html.parser").prettify())
 
@@ -230,6 +244,7 @@ for h in handler_names:
     safe_name = h.replace(" ", "_")
     html_handler_view += f"<div class='post-it'><a href='{safe_name}.html'>{h}</a></div>"
 html_handler_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(handlers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_handler_view, "html.parser").prettify())
 
@@ -239,32 +254,41 @@ for a in automation_names:
     safe_name = a.replace(" ", "_")
     html_auto_view += f"<div class='post-it'><a href='{safe_name}.html'>{a}</a></div>"
 html_auto_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(automation_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_auto_view, "html.parser").prettify())
 
 # --- TESTER DETAIL PAGES ---
 for t in tester_names:
-    write_detail_page(t, "view.html", keyword_lists[t],
-                      os.path.join(testers_folder, f"{t}.html"),
-                      "No documents found for this Tester.")
+    write_detail_page(
+        t, "view.html", keyword_lists[t],
+        os.path.join(testers_folder, f"{t}.html"),
+        "No documents found for this Tester."
+    )
 
 # --- HANDLER DETAIL PAGES ---
 for h in handler_names:
     safe_name = h.replace(" ", "_")
-    write_detail_page(h, "view.html", keyword_lists[h],
-                      os.path.join(handlers_folder, f"{safe_name}.html"),
-                      "No documents found for this Handler.")
+    write_detail_page(
+        h, "view.html", keyword_lists[h],
+        os.path.join(handlers_folder, f"{safe_name}.html"),
+        "No documents found for this Handler."
+    )
 
 # --- AUTOMATION DETAIL PAGES ---
 for a in automation_names:
     safe_name = a.replace(" ", "_")
-    write_detail_page(a, "view.html", keyword_lists[a],
-                      os.path.join(automation_folder, f"{safe_name}.html"),
-                      "No documents found for this Automation Equipment.")
+    write_detail_page(
+        a, "view.html", keyword_lists[a],
+        os.path.join(automation_folder, f"{safe_name}.html"),
+        "No documents found for this Automation Equipment."
+    )
 
-# --- OTHER PAGE ---
-write_detail_page("Other", "../FinalTest.html", other_lists,
-                  os.path.join(other_folder, "view.html"),
-                  "No documents found for Other.")
+# --- GENERAL PAGE (was OTHER PAGE) ---
+write_detail_page(
+    "General", "../FinalTest.html", general_lists,
+    os.path.join(general_folder, "view.html"),
+    "No documents found for General."
+)
 
 print("\n✅ HTML generated.")

@@ -26,7 +26,7 @@ else:
         data = []
 
 # List of equipment names
-equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Despatch", "Peel Force Tester"]
+equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester"]
 
 # Initialize dictionary
 equipment_skill_lists = {

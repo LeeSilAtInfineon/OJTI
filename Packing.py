@@ -24,10 +24,10 @@ else:
         data = []
 
 # --- 3. DEFINITIONS & EXCLUSION LISTS ---
-packing_equipment_names = ["DPL"]
+packing_equipment_names = ["DPL", "Despatch"]
 ibis_names         = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
 keywords           = ["DPLP", "Subcon", "Shipping"]
-equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Despatch", "Peel Force Tester"]
+equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM",  "Peel Force Tester"]
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
 tester_names       = ["V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "Rasco", "EXAScale", "J750"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT"]
@@ -47,7 +47,9 @@ packing_equipment_skill_lists = {
     equipment: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for equipment in packing_equipment_names
 }
-other_packing_skill_lists = {
+
+# CHANGED: other_packing_skill_lists -> general_skill_lists
+general_skill_lists = {
     f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)
 }
 
@@ -70,16 +72,16 @@ def level_role_label(i: int) -> str:
 LEVEL_HEADER = "<tr class='header-row'><th>Level/Role</th><th>Documents</th></tr>"
 
 print("🔄 Processing data...")
-total_processed = 0
+total_processed   = 0
 debug_other_added = 0
 
 for row in data:
     if len(row) < 2:
         continue
 
-    value      = str(row[0]) if pd.notna(row[0]) else ""
-    link       = str(row[1]) if pd.notna(row[1]) else ""
-    col6       = str(row[5]) if (len(row) > 5 and pd.notna(row[5])) else ""  # 6th column
+    value = str(row[0]) if pd.notna(row[0]) else ""
+    link  = str(row[1]) if pd.notna(row[1]) else ""
+    col6  = str(row[5]) if (len(row) > 5 and pd.notna(row[5])) else ""
 
     if not value.strip() or not link.strip():
         continue
@@ -108,7 +110,7 @@ for row in data:
     if matched_specific:
         continue
 
-    # 2. OTHER PACKING
+    # 2. GENERAL (was Other Packing)
     #    col6 must contain "packing" AND not already matched to specific equipment
     if "packing" in col6.lower() and link not in matched_links:
         for i in range(1, 7):
@@ -118,16 +120,17 @@ for row in data:
                     f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}'"
                     f" target='_blank'>{link}</a>"
                 )
-                other_packing_skill_lists[f"Skill Level {i}"]["list"].append(entry)
-                other_packing_skill_lists[f"Skill Level {i}"]["count"] += 1
+                general_skill_lists[f"Skill Level {i}"]["list"].append(entry)
+                general_skill_lists[f"Skill Level {i}"]["count"] += 1
                 total_processed += 1
                 debug_other_added += 1
 
-total_other_packing = sum(other_packing_skill_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
+# CHANGED: total_other_packing -> total_general
+total_general = sum(general_skill_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
 
 print(f"✅ Total entries processed : {total_processed}")
-print(f"📌 Other Packing total     : {total_other_packing}")
-print(f"➕ Added to Other Packing  : {debug_other_added}")
+print(f"📌 General total           : {total_general}")
+print(f"➕ Added to General         : {debug_other_added}")
 
 # --- 4. CSS ---
 dashboard_css = """
@@ -160,7 +163,7 @@ body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; 
 """
 
 # --- 5. MAIN DASHBOARD (Packing/Packing.html) ---
-# ⚠️ Other Packing tile is ALWAYS shown
+# CHANGED: "Other Packing" tile -> "General" tile
 html  = f"<html><head><style>{dashboard_css}</style></head><body>"
 html += "<div class='container'>"
 html += "<div class='header'><a href='../index.html' class='home-btn'>Return to Home</a></div>"
@@ -170,8 +173,8 @@ html += "<div class='main-content'><div class='post-it-container'>"
 for equipment in packing_equipment_names:
     html += f"<div class='post-it'><a href='Packing/{equipment}.html'>{equipment}</a></div>"
 
-# Always show Other Packing tile
-html += "<div class='post-it'><a href='Packing/Other_Packing.html'>Other Packing</a></div>"
+# CHANGED: Other Packing -> General, links to General.html
+html += "<div class='post-it'><a href='Packing/General.html'>General</a></div>"
 
 html += "</div></div></div></div></body></html>"
 
@@ -185,6 +188,7 @@ for equipment in packing_equipment_names:
     eq_html += f"<a href='../Packing.html' class='back-btn'>← Back to Dashboard</a>"
     eq_html += f"<h1>{equipment}</h1>"
     eq_html += f"<table class='data-table'>{LEVEL_HEADER}"
+
     has_data = False
     for i in range(1, 7):
         if packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["count"] > 0:
@@ -196,26 +200,29 @@ for equipment in packing_equipment_names:
                 f"<td class='data-cell'>{content}</td>"
                 f"</tr>"
             )
+
     if not has_data:
         eq_html += "<tr><td class='skill-level' colspan='2'>No documents found for this equipment.</td></tr>"
+
     eq_html += "</table></body></html>"
+
     with open(os.path.join(nested_folder, f"{equipment}.html"), "w", encoding="utf-8") as file:
         print(BeautifulSoup(eq_html, 'html.parser').prettify(), file=file)
 
 print("✅ Written: Equipment detail pages")
 
-# --- 7. OTHER PACKING PAGE (always written) ---
-other_html  = f"<html><head><style>{detail_css}</style></head><body>"
-other_html += "<a href='../Packing.html' class='back-btn'>← Back to Dashboard</a>"
-other_html += "<h1>Other Packing</h1>"
-other_html += f"<table class='data-table'>{LEVEL_HEADER}"
-has_data = False
+# --- 7. GENERAL PAGE (was Other Packing) ---
+general_html  = f"<html><head><style>{detail_css}</style></head><body>"
+general_html += "<a href='../Packing.html' class='back-btn'>← Back to Dashboard</a>"
+general_html += "<h1>General</h1>"
+general_html += f"<table class='data-table'>{LEVEL_HEADER}"
 
+has_data = False
 for i in range(1, 7):
-    if other_packing_skill_lists[f"Skill Level {i}"]["count"] > 0:
+    if general_skill_lists[f"Skill Level {i}"]["count"] > 0:
         has_data = True
-        content = '<br/><br/>'.join(other_packing_skill_lists[f"Skill Level {i}"]["list"])
-        other_html += (
+        content = '<br/><br/>'.join(general_skill_lists[f"Skill Level {i}"]["list"])
+        general_html += (
             f"<tr>"
             f"<td class='skill-level'>{level_role_label(i)}</td>"
             f"<td class='data-cell'>{content}</td>"
@@ -223,17 +230,18 @@ for i in range(1, 7):
         )
 
 if not has_data:
-    other_html += "<tr><td class='skill-level' colspan='2'>No documents found.</td></tr>"
+    general_html += "<tr><td class='skill-level' colspan='2'>No documents found.</td></tr>"
 
-other_html += "</table></body></html>"
+general_html += "</table></body></html>"
 
-with open(os.path.join(nested_folder, "Other_Packing.html"), "w", encoding="utf-8") as file:
-    print(BeautifulSoup(other_html, 'html.parser').prettify(), file=file)
-print("✅ Written: Packing/Packing/Other_Packing.html")
+# CHANGED: saved as General.html
+with open(os.path.join(nested_folder, "General.html"), "w", encoding="utf-8") as file:
+    print(BeautifulSoup(general_html, 'html.parser').prettify(), file=file)
 
+print("✅ Written: Packing/Packing/General.html")
 print("\n✅ Done.")
 print("\n📋 Logic Summary:")
-print("   DPL          : whole word match in col1, NO column filter")
-print("   Other Packing: col6 contains 'packing' + NOT already matched to DPL")
+print("   DPL     : whole word match in col1, NO column filter")
+print("   General : col6 contains 'packing' + NOT already matched to DPL")
 print("📋 Column header : Level/Role")
 print("📋 Cell format   : Level 1 (Operator) / Level 3 (Technician)")
