@@ -19,7 +19,7 @@ excel_path = r"C:\\Users\\leesil\\Python Projects\\Git Branch\\Master\\OJTI\\exp
 
 # CHANGED: Moved EXAScale to the front of tester_names so it matches BEFORE V93K
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
-tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750"]
+tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750","Flex"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT", "Rasco"]
 
 keywords = tester_names + handler_names + automation_names
