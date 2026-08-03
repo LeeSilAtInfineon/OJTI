@@ -25,14 +25,17 @@ else:
 
 # --- 3. DEFINITIONS & EXCLUSION LISTS ---
 packing_equipment_names = ["DPL", "Despatch"]
+
 ibis_names         = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
 keywords           = ["DPLP", "Subcon", "Shipping"]
-equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM",  "Peel Force Tester"]
+equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester"]
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
 tester_names       = ["V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "Rasco", "EXAScale", "J750"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT"]
 
-all_exclusion_keywords = (
+# Exclude these from Packing/General (in addition to the specific-equipment match)
+# NOTE: We exclude packing_equipment_names themselves so DPL/Despatch docs don't double-appear in General.
+GENERAL_PACKING_EXCLUDE_TERMS = (
     packing_equipment_names +
     ibis_names +
     keywords +
@@ -42,18 +45,22 @@ all_exclusion_keywords = (
     handler_names
 )
 
+def contains_any_excluded_term(title: str) -> bool:
+    """
+    Case-insensitive substring match against exclusion terms.
+    If True, do NOT include in Packing/General.
+    """
+    t = str(title).lower()
+    return any(term.lower() in t for term in GENERAL_PACKING_EXCLUDE_TERMS)
+
 # Initialize dictionaries
 packing_equipment_skill_lists = {
     equipment: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for equipment in packing_equipment_names
 }
 
-# CHANGED: other_packing_skill_lists -> general_skill_lists
-general_skill_lists = {
-    f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)
-}
+general_skill_lists = {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
 
-# Track links already matched to specific equipment
 matched_links = set()
 
 # Skill Level -> Role mapping
@@ -71,66 +78,79 @@ def level_role_label(i: int) -> str:
 
 LEVEL_HEADER = "<tr class='header-row'><th>Level/Role</th><th>Documents</th></tr>"
 
+def detect_skill_level(title: str):
+    """Robust detection: handles (Skill Level 2), (Skill level 2), (Skill Level2), etc."""
+    m = re.search(r"\(\s*Skill\s*[Ll]evel\s*([1-6])\s*\)", str(title))
+    return int(m.group(1)) if m else None
+
+def make_entry(title: str, link: str) -> str:
+    title = str(title).strip()
+    link = str(link).strip()
+    return (
+        f"{title} - "
+        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}' target='_blank'>{link}</a>"
+    )
+
 print("🔄 Processing data...")
-total_processed   = 0
-debug_other_added = 0
+
+total_processed = 0
+debug_general_added = 0
+debug_general_skipped_exclusion = 0
 
 for row in data:
-    if len(row) < 2:
+    padded_row = list(row) + [""] * max(0, 6 - len(row))
+    value = str(padded_row[0]).strip() if pd.notna(padded_row[0]) else ""
+    link  = str(padded_row[1]).strip() if pd.notna(padded_row[1]) else ""
+    col6  = str(padded_row[5]).strip() if pd.notna(padded_row[5]) else ""
+
+    if not value or not link:
         continue
 
-    value = str(row[0]) if pd.notna(row[0]) else ""
-    link  = str(row[1]) if pd.notna(row[1]) else ""
-    col6  = str(row[5]) if (len(row) > 5 and pd.notna(row[5])) else ""
-
-    if not value.strip() or not link.strip():
+    lvl = detect_skill_level(value)
+    if lvl is None:
         continue
 
     value_lower = value.lower()
-    matched_specific = False
+    entry = make_entry(value, link)
 
-    # 1. CHECK FOR SPECIFIC EQUIPMENT (DPL) - whole word match
+    # 1) CHECK FOR SPECIFIC EQUIPMENT (DPL, Despatch) - whole word match
+    matched_specific = False
     for equipment in packing_equipment_names:
-        pattern = r'\b' + re.escape(equipment.lower()) + r'\b'
+        pattern = r"\b" + re.escape(equipment.lower()) + r"\b"
         if re.search(pattern, value_lower):
             matched_specific = True
             matched_links.add(link)
-            for i in range(1, 7):
-                if f"(Skill Level {i})" in value:
-                    entry = (
-                        f"{value} - "
-                        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}'"
-                        f" target='_blank'>{link}</a>"
-                    )
-                    packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["list"].append(entry)
-                    packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["count"] += 1
-                    total_processed += 1
+
+            bucket = packing_equipment_skill_lists[equipment][f"Skill Level {lvl}"]
+            if entry not in bucket["list"]:  # de-dup
+                bucket["list"].append(entry)
+                bucket["count"] += 1
+                total_processed += 1
             break
 
     if matched_specific:
         continue
 
-    # 2. GENERAL (was Other Packing)
-    #    col6 must contain "packing" AND not already matched to specific equipment
+    # 2) GENERAL: col6 must contain "packing" AND not already matched
+    #    PLUS: exclude if contains any terms from the other lists (ibis/tester/handler/etc.)
     if "packing" in col6.lower() and link not in matched_links:
-        for i in range(1, 7):
-            if f"(Skill Level {i})" in value:
-                entry = (
-                    f"{value} - "
-                    f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}'"
-                    f" target='_blank'>{link}</a>"
-                )
-                general_skill_lists[f"Skill Level {i}"]["list"].append(entry)
-                general_skill_lists[f"Skill Level {i}"]["count"] += 1
-                total_processed += 1
-                debug_other_added += 1
+        if contains_any_excluded_term(value):
+            debug_general_skipped_exclusion += 1
+            continue
 
-# CHANGED: total_other_packing -> total_general
+        bucket = general_skill_lists[f"Skill Level {lvl}"]
+        if entry not in bucket["list"]:  # de-dup
+            bucket["list"].append(entry)
+            bucket["count"] += 1
+            total_processed += 1
+            debug_general_added += 1
+
 total_general = sum(general_skill_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
 
 print(f"✅ Total entries processed : {total_processed}")
 print(f"📌 General total           : {total_general}")
-print(f"➕ Added to General         : {debug_other_added}")
+print(f"➕ Added to General         : {debug_general_added}")
+print(f"🚫 Skipped from General (exclusion match): {debug_general_skipped_exclusion}")
 
 # --- 4. CSS ---
 dashboard_css = """
@@ -156,14 +176,13 @@ body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; 
 .data-table { border-collapse: collapse; width: 100%; font-size: 18px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); background-color: #fff; }
 .header-row { background-color: #f0f0f0; color: #333; font-weight: bold; }
 .header-row th { padding: 12px; text-align: left; }
-.skill-level { text-align: left; font-size: 16px; padding: 12px; border-bottom: 1px solid #ddd; }
+.skill-level { text-align: left; font-size: 16px; padding: 12px; border-bottom: 1px solid #ddd; white-space: nowrap; vertical-align: top; }
 .data-cell { text-align: left; font-size: 18px; padding: 12px; border-bottom: 1px solid #ddd; line-height: 1.5; }
 .data-cell.empty { background-color: #cccccc; }
 .data-cell:hover { background-color: #f0f0f0; }
 """
 
 # --- 5. MAIN DASHBOARD (Packing/Packing.html) ---
-# CHANGED: "Other Packing" tile -> "General" tile
 html  = f"<html><head><style>{dashboard_css}</style></head><body>"
 html += "<div class='container'>"
 html += "<div class='header'><a href='../index.html' class='home-btn'>Return to Home</a></div>"
@@ -173,14 +192,13 @@ html += "<div class='main-content'><div class='post-it-container'>"
 for equipment in packing_equipment_names:
     html += f"<div class='post-it'><a href='Packing/{equipment}.html'>{equipment}</a></div>"
 
-# CHANGED: Other Packing -> General, links to General.html
 html += "<div class='post-it'><a href='Packing/General.html'>General</a></div>"
-
 html += "</div></div></div></div></body></html>"
 
 with open(os.path.join(main_folder, "Packing.html"), "w", encoding="utf-8") as file:
-    print(BeautifulSoup(html, 'html.parser').prettify(), file=file)
-print(f"✅ Written: Packing/Packing.html")
+    print(BeautifulSoup(html, "html.parser").prettify(), file=file)
+
+print("✅ Written: Packing/Packing.html")
 
 # --- 6. INDIVIDUAL PACKING EQUIPMENT PAGES ---
 for equipment in packing_equipment_names:
@@ -191,9 +209,11 @@ for equipment in packing_equipment_names:
 
     has_data = False
     for i in range(1, 7):
-        if packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["count"] > 0:
+        bucket = packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["list"]
+        if bucket:
             has_data = True
-            content = '<br/><br/>'.join(packing_equipment_skill_lists[equipment][f"Skill Level {i}"]["list"])
+            bucket_sorted = sorted(bucket, key=lambda x: x.lower())
+            content = "<br/><br/>".join(bucket_sorted)
             eq_html += (
                 f"<tr>"
                 f"<td class='skill-level'>{level_role_label(i)}</td>"
@@ -207,11 +227,11 @@ for equipment in packing_equipment_names:
     eq_html += "</table></body></html>"
 
     with open(os.path.join(nested_folder, f"{equipment}.html"), "w", encoding="utf-8") as file:
-        print(BeautifulSoup(eq_html, 'html.parser').prettify(), file=file)
+        print(BeautifulSoup(eq_html, "html.parser").prettify(), file=file)
 
 print("✅ Written: Equipment detail pages")
 
-# --- 7. GENERAL PAGE (was Other Packing) ---
+# --- 7. GENERAL PAGE ---
 general_html  = f"<html><head><style>{detail_css}</style></head><body>"
 general_html += "<a href='../Packing.html' class='back-btn'>← Back to Dashboard</a>"
 general_html += "<h1>General</h1>"
@@ -219,9 +239,11 @@ general_html += f"<table class='data-table'>{LEVEL_HEADER}"
 
 has_data = False
 for i in range(1, 7):
-    if general_skill_lists[f"Skill Level {i}"]["count"] > 0:
+    bucket = general_skill_lists[f"Skill Level {i}"]["list"]
+    if bucket:
         has_data = True
-        content = '<br/><br/>'.join(general_skill_lists[f"Skill Level {i}"]["list"])
+        bucket_sorted = sorted(bucket, key=lambda x: x.lower())
+        content = "<br/><br/>".join(bucket_sorted)
         general_html += (
             f"<tr>"
             f"<td class='skill-level'>{level_role_label(i)}</td>"
@@ -234,14 +256,14 @@ if not has_data:
 
 general_html += "</table></body></html>"
 
-# CHANGED: saved as General.html
 with open(os.path.join(nested_folder, "General.html"), "w", encoding="utf-8") as file:
-    print(BeautifulSoup(general_html, 'html.parser').prettify(), file=file)
+    print(BeautifulSoup(general_html, "html.parser").prettify(), file=file)
 
 print("✅ Written: Packing/Packing/General.html")
+
 print("\n✅ Done.")
 print("\n📋 Logic Summary:")
-print("   DPL     : whole word match in col1, NO column filter")
-print("   General : col6 contains 'packing' + NOT already matched to DPL")
+print("   DPL/Despatch : whole word match in col1, NO column filter")
+print("   General      : col6 contains 'packing' + NOT matched to DPL/Despatch + NOT matching exclusion lists")
 print("📋 Column header : Level/Role")
 print("📋 Cell format   : Level 1 (Operator) / Level 3 (Technician)")

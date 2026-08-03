@@ -6,7 +6,6 @@ import re
 # --- 1. FOLDER SETUP ---
 main_folder = "IBIS"
 os.makedirs(main_folder, exist_ok=True)
-
 nested_folder = os.path.join(main_folder, "IBIS")
 os.makedirs(nested_folder, exist_ok=True)
 
@@ -29,7 +28,6 @@ else:
 # CONFIG
 # ---------------------------------------------------------------------------
 generation_names = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32", "General"]
-
 generation_display_names = {
     "MGT":     "MGT",
     "Mirae":   "MIS",
@@ -48,12 +46,43 @@ SKILL_ROLE = {
     6: "Technician",
 }
 
-# Single source of truth for the table header
 LEVEL_HEADER = "<tr class='header-row'><th>Level/Role</th><th>Documents</th></tr>"
 
 generation_skill_lists = {
     generation: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for generation in generation_names
+}
+
+# ---------------------------------------------------------------------------
+# EXCLUSION LISTS (for General tab only)
+# ---------------------------------------------------------------------------
+packing_equipment_names = ["DPL", "Despatch"]
+ibis_names              = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
+keywords                = ["DPLP", "Subcon", "Shipping"]
+equipment_names         = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester"]
+automation_names        = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
+tester_names            = ["V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "Rasco", "EXAScale", "J750"]
+handler_names           = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT"]
+
+GENERAL_EXCLUDE_TERMS = (
+    packing_equipment_names
+    + ibis_names
+    + keywords
+    + equipment_names
+    + automation_names
+    + tester_names
+    + handler_names
+)
+
+# ---------------------------------------------------------------------------
+# SPECIFIC ID ROUTING TABLE
+# doc_id -> list of tabs to add to
+# Add any future special cases here without touching routing logic
+# ---------------------------------------------------------------------------
+SPECIFIC_ID_ROUTES = {
+    "Z8F46861657": ["Gen2",  "Gen 3"],               # Basic Operation of IBIS Oven
+    "Z8F46861656": ["Mirae", "MGT", "Gen2", "Gen 32"], # Inteligent Burn-in System (IBIS)
+    "Z8F46860272": ["Gen 3", "Gen 32"],               # Gen 3 IBIS Process
 }
 
 # ---------------------------------------------------------------------------
@@ -78,31 +107,65 @@ def detect_skill_level(value):
         return int(match.group(1))
     return None
 
-def detect_primary_generation(value):
-    val_lower = str(value).lower()
-    if re.search(r"\bgen[\s\-]*32\b", val_lower):
-        return "Gen 32"
-    if re.search(r"\bgen[\s\-]*3\b", val_lower):
-        return "Gen 3"
-    if re.search(r"\bgen[\s\-]*2\b", val_lower):
-        return "Gen2"
-    if re.search(r"\bmb8[1iI]\b", val_lower):
-        return "MGT"
-    if re.search(r"\bmgt\b", val_lower):
-        return "MGT"
-    if re.search(r"\bm850[i1]\b", val_lower):
-        return "Mirae"
-    if re.search(r"\bmirae\b", val_lower):
-        return "Mirae"
-    return None
+def detect_all_generations(value):
+    text  = str(value).lower()
+    found = []
 
-# --- 3. DATA PROCESSING ---
-ibis_count    = 0
-skipped_count = 0
+    if re.search(r"gen[\s\-]*32", text):
+        found.append("Gen 32")
+    if re.search(r"gen[\s\-]*3", text) and "Gen 32" not in found:
+        found.append("Gen 3")
+    if re.search(r"gen[\s\-]*2", text):
+        found.append("Gen2")
+    if re.search(r"mgt", text) or re.search(r"mb8[1i]", text):
+        found.append("MGT")
+    if re.search(r"mis", text) or re.search(r"mirae", text) or re.search(r"m850[1i]", text):
+        found.append("Mirae")
+    if re.search(r"\bgeneral\b", text):
+        found.append("General")
+
+    seen   = set()
+    unique = []
+    for g in found:
+        if g not in seen:
+            seen.add(g)
+            unique.append(g)
+
+    return unique if unique else ["General"]
+
+def should_exclude_from_general(title):
+    t = str(title).lower()
+    return any(term.lower() in t for term in GENERAL_EXCLUDE_TERMS)
+
+def is_ibis_row(col1, col6):
+    t1 = str(col1).lower()
+    t6 = str(col6).lower()
+
+    if "ibis" in t6:
+        return True
+
+    col6_empty = col6.strip() == "" or col6.strip().lower() in ["nan", "none"]
+    if col6_empty:
+        if re.search(r"\bibis\b", t1):
+            return True
+        if re.search(r"\bmgt\b", t1) or re.search(r"\bmb8[1i]\b", t1):
+            return True
+        if re.search(r"\bmirae\b", t1) or re.search(r"\bm850[1i]\b", t1):
+            return True
+        if re.search(r"\bgen[\s\-]*32\b", t1) or re.search(r"\bgen[\s\-]*3\b", t1) or re.search(r"\bgen[\s\-]*2\b", t1):
+            return True
+
+    return False
+
+# ---------------------------------------------------------------------------
+# DATA PROCESSING
+# ---------------------------------------------------------------------------
+ibis_count       = 0
+skipped_count    = 0
+excluded_general = 0
 
 for row in data:
     padded_row = list(row) + [""] * max(0, 6 - len(row))
-
     col1 = str(padded_row[0]).strip() if pd.notna(padded_row[0]) else ""
     col2 = str(padded_row[1]).strip() if pd.notna(padded_row[1]) else ""
     col6 = str(padded_row[5]).strip() if pd.notna(padded_row[5]) else ""
@@ -110,7 +173,7 @@ for row in data:
     if not col1:
         continue
 
-    if "(IBIS)" not in col6:
+    if not is_ibis_row(col1, col6):
         skipped_count += 1
         continue
 
@@ -120,74 +183,78 @@ for row in data:
     skill_level = skill_level if skill_level in range(1, 7) else 1
     skill_key   = f"Skill Level {skill_level}"
     entry       = make_entry(col1, col2)
-    is_oven     = "oven" in col1.lower()
-    primary_gen = detect_primary_generation(col1)
     title_lower = col1.lower()
+    is_oven     = "oven" in title_lower
 
     # -----------------------------------------------------------------------
-    # RULE 2: ID = Z8F46861657 -> Gen2 AND Gen 3
+    # RULE 0: Specific ID overrides (highest priority)
     # -----------------------------------------------------------------------
-    if col2 == "Z8F46861657":
-        add_entry("Gen2",  skill_key, entry)
-        add_entry("Gen 3", skill_key, entry)
+    if col2 in SPECIFIC_ID_ROUTES:
+        for gen in SPECIFIC_ID_ROUTES[col2]:
+            add_entry(gen, skill_key, entry)
         continue
 
     # -----------------------------------------------------------------------
-    # RULE 3: Skill Level 3
-    # NEW EXCEPTION: OJTI + Gen 3 (not Gen 32) -> Gen 3 ONLY
-    # Otherwise -> ALL tabs
+    # RULE 1: Skill Level 3 -> ALL tabs
     # -----------------------------------------------------------------------
     if skill_level == 3:
-        is_gen32 = bool(re.search(r"\bgen[\s\-]*32\b", title_lower))
-        is_gen3  = bool(re.search(r"\bgen[\s\-]*3\b",  title_lower))
-
-        if "ojti" in title_lower and is_gen3 and not is_gen32:
-            # Gen 3 OJTI -> Gen 3 tab only, not all tabs
-            add_entry("Gen 3", "Skill Level 3", entry)
-        else:
-            # Everything else at Skill Level 3 -> ALL tabs
-            for gen in generation_names:
-                add_entry(gen, "Skill Level 3", entry)
+        for gen in generation_names:
+            add_entry(gen, skill_key, entry)
         continue
 
+    detected_tabs = detect_all_generations(col1)
+
     # -----------------------------------------------------------------------
-    # RULE 4: Skill Level 4 -> specific gen or Gen2
+    # RULE 2: Skill Level 4 -> detected tabs else Gen2
     # -----------------------------------------------------------------------
     if skill_level == 4:
-        add_entry(primary_gen if primary_gen else "Gen2", skill_key, entry)
+        if detected_tabs == ["General"]:
+            add_entry("Gen2", skill_key, entry)
+        else:
+            for t in detected_tabs:
+                add_entry(t, skill_key, entry)
         continue
 
     # -----------------------------------------------------------------------
-    # OVEN RULE: oven + specific gen -> that tab, else General
+    # RULE 3: Oven -> detected tabs (apply General exclusion)
     # -----------------------------------------------------------------------
     if is_oven:
-        add_entry(primary_gen if primary_gen else "General", skill_key, entry)
+        for t in detected_tabs:
+            if t == "General":
+                if should_exclude_from_general(col1):
+                    excluded_general += 1
+                else:
+                    add_entry("General", skill_key, entry)
+            else:
+                add_entry(t, skill_key, entry)
         continue
 
     # -----------------------------------------------------------------------
-    # STANDARD ROUTING: specific gen -> that tab, else General
+    # RULE 4: Default -> detected tabs (apply General exclusion)
     # -----------------------------------------------------------------------
-    add_entry(primary_gen if primary_gen else "General", skill_key, entry)
+    for t in detected_tabs:
+        if t == "General":
+            if should_exclude_from_general(col1):
+                excluded_general += 1
+            else:
+                add_entry("General", skill_key, entry)
+        else:
+            add_entry(t, skill_key, entry)
 
-print(f"\n📊 Rows processed : {ibis_count} IBIS rows")
-print(f"📊 Rows skipped   : {skipped_count} non-IBIS rows (ignored)")
+print(f"\n📊 Rows processed       : {ibis_count} IBIS rows")
+print(f"📊 Rows skipped         : {skipped_count} non-IBIS rows")
+print(f"🚫 Blocked from General : {excluded_general} rows")
 
 # ---------------------------------------------------------------------------
 # SHARED STYLE
 # ---------------------------------------------------------------------------
 SHARED_STYLE = """
-    body {
-        font-family: Arial, sans-serif;
-        font-size: 16px;
-        color: #333;
-        margin: 20px;
-        background-color: #f0f0f0;
-    }
+    body { font-family: Arial, sans-serif; font-size: 16px; color: #333; margin: 20px; background-color: #f0f0f0; }
     a { color: #08665c; text-decoration: none; }
     a:hover { color: #054a40; text-decoration: underline; }
 """
 
-# --- 4. MAIN DASHBOARD (IBIS/IBIS.html) ---
+# --- 4. MAIN DASHBOARD ---
 html = "<html><head><style>"
 html += SHARED_STYLE
 html += """
@@ -222,7 +289,7 @@ with open(os.path.join(main_folder, "IBIS.html"), "w", encoding="utf-8") as f:
 for generation in generation_names:
     display = generation_display_names.get(generation, generation)
 
-    generation_html  = "<html><head><style>"
+    generation_html = "<html><head><style>"
     generation_html += SHARED_STYLE
     generation_html += """
     .back-btn { display: inline-block; padding: 10px 20px; background-color: #08665c; color: #fff; text-decoration: none; border-radius: 5px; font-size: 16px; margin-bottom: 20px; transition: background-color 0.3s; }
@@ -245,11 +312,13 @@ for generation in generation_names:
 
     has_data = False
     for i in range(1, 7):
-        sk = f"Skill Level {i}"
-        if generation_skill_lists[generation][sk]["count"] > 0:
-            has_data = True
-            role      = SKILL_ROLE.get(i, "")
-            docs_html = "<br/><br/>".join(generation_skill_lists[generation][sk]["list"])
+        sk   = f"Skill Level {i}"
+        docs = generation_skill_lists[generation][sk]["list"]
+        if docs:
+            has_data     = True
+            role         = SKILL_ROLE.get(i, "")
+            sorted_docs  = sorted(docs, key=lambda x: x.lower())
+            docs_html    = "<br/><br/>".join(sorted_docs)
             generation_html += (
                 f"<tr>"
                 f"<td class='level-cell'>Level {i} ({role})</td>"
@@ -258,13 +327,7 @@ for generation in generation_names:
             )
 
     if not has_data:
-        generation_html += (
-            "<tr>"
-            "<td class='level-cell' colspan='2'>"
-            "No documents found for this generation."
-            "</td>"
-            "</tr>"
-        )
+        generation_html += "<tr><td class='level-cell' colspan='2'>No documents found for this generation.</td></tr>"
 
     generation_html += "</table></body></html>"
 
@@ -274,7 +337,6 @@ for generation in generation_names:
 print("\n✅ Processing Complete.")
 print("📁 Dashboard : IBIS/IBIS.html")
 print("📁 Pages     : IBIS/IBIS/[Generation].html")
-print("📋 Column header : Level/Role")
-print("📋 Cell format   : Level 1 (Operator) / Level 3 (Technician)")
-print("📋 Rule: OJTI + Gen 3 (SL3) -> Gen 3 tab only")
-print("📋 Rule: All other SL3      -> ALL tabs")
+print("📋 Specific ID overrides applied")
+print("📋 Strict IBIS filter + General exclusion list applied")
+print("📋 Sorting : Level (1-6), then document name A-Z")
