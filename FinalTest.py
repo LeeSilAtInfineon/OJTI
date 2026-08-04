@@ -10,8 +10,6 @@ output_folder     = "Final Test"
 testers_folder    = os.path.join(output_folder, "Testers")
 handlers_folder   = os.path.join(output_folder, "Handlers")
 automation_folder = os.path.join(output_folder, "Automation")
-
-# CHANGED: "Other" -> "General"
 general_folder    = os.path.join(output_folder, "General")
 
 for folder in [output_folder, testers_folder, handlers_folder, automation_folder, general_folder]:
@@ -19,11 +17,9 @@ for folder in [output_folder, testers_folder, handlers_folder, automation_folder
 
 excel_path = r"C:\\Users\\leesil\\Python Projects\\Git Branch\\Master\\OJTI\\export.xlsx"
 
-# CHANGED: Moved EXAScale to the front of tester_names so it matches BEFORE V93K
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
-tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750","Flex"]
+tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750", "Flex"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT", "Rasco"]
-
 keywords = tester_names + handler_names + automation_names
 
 SKILL_ROLE = {
@@ -42,7 +38,6 @@ def norm(s: str) -> str:
     """Normalize string for matching: uppercase and remove spaces/hyphens/underscores."""
     return re.sub(r"[\s\-_]+", "", str(s).upper())
 
-# Flexible skill level extraction
 SKILL_RE = re.compile(r"skill\s*level\s*[:\-]?\s*(\d)", re.IGNORECASE)
 
 def extract_skill_level(text: str):
@@ -75,22 +70,76 @@ keyword_lists = {
     name: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for name in keywords
 }
-
-# CHANGED: other_lists -> general_lists
 general_lists = {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
-
 matched_links = set()
+
+# --------------------------------------------------------------------------
+# HARDCODED DOCS (ALWAYS INCLUDE)
+# doc_id -> {"title": "...", "targets": [kw1, kw2, ...], "skill": 3}
+#
+# targets:
+#   - use "ALL" to add to ALL tester/handler/automation keyword tabs
+#   - use "GENERAL" to add to General
+#   - or list specific keyword names from tester_names/handler_names/automation_names
+# --------------------------------------------------------------------------
+HARDCODED_DOCS = {
+    "Z8F46860675": {
+        "title": "OJTI for IBIS Equipment Safe Release (ESR). (Skill Level 3)(TWI)",
+        "targets": ["ALL"],  # change if you want specific tabs only
+        "skill": 3
+    },
+    "Z8F46861705": {
+        "title": "OJTI on Defect Catalogue for Mechanical Rejects of BGA Packages.(Skill level 3)",
+        "targets": ["ALL"],
+        "skill": 3
+    },
+    "Z8F46861706": {
+        "title": "OJTI for Defect Catalogue on Mechanical Reject of Leaded and Leadless Packages. (Skill Level 3)",
+        "targets": ["ALL"],
+        "skill": 3
+    },
+    "Z8F46861707": {
+        "title": "OJTI for Conduct of Offline Defect Sensitivity Assessment(DSA). (Skill Level 3)",
+        "targets": ["ALL"],
+        "skill": 3
+    },
+    "Z8F46861711": {
+        "title": "OJTI on Process Specification, Control Systems & Alarm Handling for Test Process.(Skill Level 3)(TWI)",
+        "targets": ["ALL"],
+        "skill": 3
+    },
+    "Z8F46860019": {
+        "title": "OJTI on Final Test Tube/Tray Device Handling During Technical Intervention. (Skill Level 3) (TWI)",
+        "targets": ["ALL"],
+        "skill": 3
+    },
+}
+
+def make_entry(title, link):
+    title = str(title).strip()
+    link  = str(link).strip()
+    return (
+        f"{title} - "
+        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}' "
+        f"target='_blank'>{link}</a>"
+    )
+
+def add_to_keyword(kw, lvl, entry):
+    keyword_lists[kw][f"Skill Level {lvl}"]["list"].append(entry)
+    keyword_lists[kw][f"Skill Level {lvl}"]["count"] += 1
+
+def add_to_general(lvl, entry):
+    general_lists[f"Skill Level {lvl}"]["list"].append(entry)
+    general_lists[f"Skill Level {lvl}"]["count"] += 1
 
 print("🔄 Processing data...")
 total_processed   = 0
+debug_general_added = 0
 
-# (kept name; optional to rename, but not required)
-debug_other_added = 0
-
+# --- A) Normal keyword-based processing from Excel ---
 for row in data:
     if len(row) < 2:
         continue
-
     value = str(row[0]) if pd.notna(row[0]) else ""
     link  = str(row[1]) if pd.notna(row[1]) else ""
     col6  = str(row[5]) if (len(row) > 5 and pd.notna(row[5])) else ""
@@ -98,27 +147,23 @@ for row in data:
     if not value.strip() or not link.strip():
         continue
 
+    # Skip if it is in hardcoded docs (we inject separately)
+    if link in HARDCODED_DOCS:
+        continue
+
     lvl = extract_skill_level(value)
     if lvl is None:
         continue
-    i = lvl
 
     value_norm = norm(value)
-
-    entry = (
-        f"{value} - "
-        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}' "
-        f"target='_blank'>{link}</a>"
-    )
+    entry = make_entry(value, link)
 
     matched_specific = False
 
     # 1) Match Testers / Handlers / Automation
-    # Because EXAScale is now first in tester_names, it will match before V93K
     for kw in keywords:
         if norm(kw) in value_norm:
-            keyword_lists[kw][f"Skill Level {i}"]["list"].append(entry)
-            keyword_lists[kw][f"Skill Level {i}"]["count"] += 1
+            add_to_keyword(kw, lvl, entry)
             total_processed += 1
             matched_specific = True
             matched_links.add(link)
@@ -129,16 +174,41 @@ for row in data:
 
     # 2) General: col6 must contain "testing" and not matched
     if "testing" in col6.lower() and link not in matched_links:
-        general_lists[f"Skill Level {i}"]["list"].append(entry)
-        general_lists[f"Skill Level {i}"]["count"] += 1
+        add_to_general(lvl, entry)
         total_processed += 1
-        debug_other_added += 1
+        debug_general_added += 1
+
+# --- B) Hardcoded injection (ALWAYS INCLUDE) ---
+hardcoded_added = 0
+for doc_id, cfg in HARDCODED_DOCS.items():
+    lvl = int(cfg.get("skill", 3))
+    title = cfg.get("title", doc_id)
+    entry = make_entry(title, doc_id)
+    targets = cfg.get("targets", ["ALL"])
+
+    if "ALL" in targets:
+        for kw in keywords:
+            add_to_keyword(kw, lvl, entry)
+        hardcoded_added += 1
+        continue
+
+    if "GENERAL" in targets:
+        add_to_general(lvl, entry)
+        hardcoded_added += 1
+        continue
+
+    # Specific targets
+    for kw in targets:
+        if kw in keyword_lists:
+            add_to_keyword(kw, lvl, entry)
+    hardcoded_added += 1
+
+print(f"✅ Total entries processed (Excel rules) : {total_processed}")
+print(f"➕ Added to General (Excel rules)        : {debug_general_added}")
+print(f"📌 Hardcoded docs injected              : {hardcoded_added}")
 
 total_general = sum(general_lists[f"Skill Level {i}"]["count"] for i in range(1, 7))
-
-print(f"✅ Total entries processed : {total_processed}")
-print(f"📌 General total           : {total_general}")
-print(f"➕ Added to General         : {debug_other_added}")
+print(f"📌 General total                         : {total_general}")
 
 print("\n📊 Keyword counts:")
 for kw in keywords:
@@ -191,7 +261,6 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
     html += f"<div class='header'><h1>{title}</h1>"
     html += f"<a href='{back_href}' class='back-btn header-btn'>← Back</a></div>"
     html += f"<table class='data-table'>{LEVEL_HEADER}"
-
     rows_found = False
     for i in range(1, 7):
         entries = skill_dict[f"Skill Level {i}"]["list"]
@@ -201,12 +270,9 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
                 f"<tr><td class='skill-level'>{level_role_label(i)}</td>"
                 f"<td class='data-cell'>{'<br/><br/>'.join(entries)}</td></tr>"
             )
-
     if not rows_found:
         html += f"<tr><td class='skill-level' colspan='2'>{empty_msg}</td></tr>"
-
     html += "</table></body></html>"
-
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(BeautifulSoup(html, "html.parser").prettify())
 
@@ -220,10 +286,7 @@ html_master += "<div class='main-content'><div class='post-it-container'>"
 html_master += "<div class='post-it'><a href='Testers/view.html'>Tester</a></div>"
 html_master += "<div class='post-it'><a href='Handlers/view.html'>Handler</a></div>"
 html_master += "<div class='post-it'><a href='Automation/view.html'>Automation</a></div>"
-
-# CHANGED: Other -> General
 html_master += "<div class='post-it'><a href='General/view.html'>General</a></div>"
-
 html_master += "</div></div></div></div></body></html>"
 
 with open(os.path.join(output_folder, "FinalTest.html"), "w", encoding="utf-8") as f:
@@ -234,7 +297,6 @@ html_tester_view = f"<html><head><style>{dashboard_css}</style></head><body><div
 for t in tester_names:
     html_tester_view += f"<div class='post-it'><a href='{t}.html'>{t}</a></div>"
 html_tester_view += "</div></div></div></div></body></html>"
-
 with open(os.path.join(testers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_tester_view, "html.parser").prettify())
 
@@ -244,7 +306,6 @@ for h in handler_names:
     safe_name = h.replace(" ", "_")
     html_handler_view += f"<div class='post-it'><a href='{safe_name}.html'>{h}</a></div>"
 html_handler_view += "</div></div></div></div></body></html>"
-
 with open(os.path.join(handlers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_handler_view, "html.parser").prettify())
 
@@ -254,41 +315,22 @@ for a in automation_names:
     safe_name = a.replace(" ", "_")
     html_auto_view += f"<div class='post-it'><a href='{safe_name}.html'>{a}</a></div>"
 html_auto_view += "</div></div></div></div></body></html>"
-
 with open(os.path.join(automation_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_auto_view, "html.parser").prettify())
 
-# --- TESTER DETAIL PAGES ---
+# --- DETAIL PAGES ---
 for t in tester_names:
-    write_detail_page(
-        t, "view.html", keyword_lists[t],
-        os.path.join(testers_folder, f"{t}.html"),
-        "No documents found for this Tester."
-    )
-
-# --- HANDLER DETAIL PAGES ---
+    write_detail_page(t, "view.html", keyword_lists[t], os.path.join(testers_folder, f"{t}.html"),
+                      "No documents found for this Tester.")
 for h in handler_names:
     safe_name = h.replace(" ", "_")
-    write_detail_page(
-        h, "view.html", keyword_lists[h],
-        os.path.join(handlers_folder, f"{safe_name}.html"),
-        "No documents found for this Handler."
-    )
-
-# --- AUTOMATION DETAIL PAGES ---
+    write_detail_page(h, "view.html", keyword_lists[h], os.path.join(handlers_folder, f"{safe_name}.html"),
+                      "No documents found for this Handler.")
 for a in automation_names:
     safe_name = a.replace(" ", "_")
-    write_detail_page(
-        a, "view.html", keyword_lists[a],
-        os.path.join(automation_folder, f"{safe_name}.html"),
-        "No documents found for this Automation Equipment."
-    )
-
-# --- GENERAL PAGE (was OTHER PAGE) ---
-write_detail_page(
-    "General", "../FinalTest.html", general_lists,
-    os.path.join(general_folder, "view.html"),
-    "No documents found for General."
-)
+    write_detail_page(a, "view.html", keyword_lists[a], os.path.join(automation_folder, f"{safe_name}.html"),
+                      "No documents found for this Automation Equipment.")
+write_detail_page("General", "../FinalTest.html", general_lists, os.path.join(general_folder, "view.html"),
+                  "No documents found for General.")
 
 print("\n✅ HTML generated.")

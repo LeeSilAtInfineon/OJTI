@@ -24,7 +24,7 @@ else:
         data = []
 
 # --- 3. DEFINITIONS & EXCLUSION LISTS ---
-packing_equipment_names = ["DPL", "Despatch"]
+packing_equipment_names = ["DPL",]
 
 ibis_names         = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
 keywords           = ["DPLP", "Subcon", "Shipping"]

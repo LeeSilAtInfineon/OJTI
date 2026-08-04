@@ -26,9 +26,9 @@ else:
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester"]
+equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester", "KLR", "McDry", "Despatch"]
+ALL_EQUIPMENT   = equipment_names
 
-# Skill Level -> Role mapping
 SKILL_ROLE = {
     1: "Operator",
     2: "Operator",
@@ -43,48 +43,79 @@ def level_role_label(i: int) -> str:
 
 LEVEL_HEADER = "<tr class='header-row'><th>Level/Role</th><th>Documents</th></tr>"
 
-# Initialize dictionary
 equipment_skill_lists = {
     equipment: {f"Skill Level {i}": {"list": [], "count": 0} for i in range(1, 7)}
     for equipment in equipment_names
 }
 
 # ---------------------------------------------------------------------------
+# SPECIFIC ID ROUTING TABLE
+# These 6 docs are hardcoded into ALL equipment tabs at Skill Level 3
+# ---------------------------------------------------------------------------
+SPECIFIC_ID_ROUTES = {
+    "Z8F46861705": ALL_EQUIPMENT,  # OJTI on Defect Catalogue for Mechanical Rejects of BGA Packages
+    "Z8F46861706": ALL_EQUIPMENT,  # OJTI for Defect Catalogue on Mechanical Reject of Leaded and Leadless Packages
+    "Z8F46861707": ALL_EQUIPMENT,  # OJTI for Conduct of Offline Defect Sensitivity Assessment (DSA)
+    "Z8F46861709": ALL_EQUIPMENT,  # OJTI on Process Specification, Control System & Alarm Handling for MSP Process
+    "Z8F46860659": ALL_EQUIPMENT,  # OJTI for MSP Equipment Safe Release (ESR)
+    "Z8F46860837": ALL_EQUIPMENT,  # OJTI for Tube and Tray Transfer Machine Device Handling Procedure
+}
+
+FORCE_SKILL_LEVEL_BY_ID = {
+    "Z8F46861705": 3,
+    "Z8F46861706": 3,
+    "Z8F46861707": 3,
+    "Z8F46861709": 3,
+    "Z8F46860659": 3,
+    "Z8F46860837": 3,
+}
+
+# ---------------------------------------------------------------------------
+# BLOCKED DOC IDs (never appear anywhere)
+# ---------------------------------------------------------------------------
+BLOCKED_DOC_IDS = set()
+
+# ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------
 def detect_skill_level(title: str):
-    """Robust detection: (Skill Level 2), (Skill level 2), (Skill Level2), etc."""
     m = re.search(r"\(\s*Skill\s*[Ll]evel\s*([1-6])\s*\)", str(title))
     return int(m.group(1)) if m else None
 
 def make_entry(value, link):
     value = str(value).strip()
-    link = str(link).strip()
+    link  = str(link).strip()
     return (
         f"{value} - "
-        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}' target='_blank'>{link}</a>"
+        f"<a href='https://plmpublishing.icp.infineon.com/api/download-pdf/{link}' "
+        f"target='_blank'>{link}</a>"
     )
 
+def add_entry(equipment, skill_level_key, entry):
+    if equipment not in equipment_skill_lists:
+        return
+    bucket = equipment_skill_lists[equipment][skill_level_key]
+    if entry not in bucket["list"]:
+        bucket["list"].append(entry)
+        bucket["count"] += 1
+
 def matches_equipment(title: str, equipment: str) -> bool:
-    """
-    Whole-word matching for most equipment.
-    Special case: 'Peel Force Tester' should also match 'peel'.
-    """
     t = str(title)
-
     if equipment.lower() == "peel force tester":
-        # Match either phrase "peel force tester" OR the word "peel"
-        return bool(re.search(r"\bpeel\b", t, flags=re.IGNORECASE) or
-                    re.search(r"\bpeel\s+force\s+tester\b", t, flags=re.IGNORECASE))
-
-    # Default whole-word match for other equipment (case-insensitive)
+        return bool(
+            re.search(r"\bpeel\b", t, flags=re.IGNORECASE) or
+            re.search(r"\bpeel\s+force\s+tester\b", t, flags=re.IGNORECASE)
+        )
     return bool(re.search(rf"\b{re.escape(equipment)}\b", t, flags=re.IGNORECASE))
 
 # ---------------------------------------------------------------------------
 # DATA PROCESSING
+# Normal rows: keyword matching by equipment name in title
+# Hardcoded IDs are always injected at Skill Level 3 into all tabs
 # ---------------------------------------------------------------------------
-print("🔄 Processing data with Whole Word Logic...")
+print("🔄 Processing data...")
 total_processed = 0
+blocked_count   = 0
 
 for row in data:
     if len(row) < 2:
@@ -92,23 +123,61 @@ for row in data:
 
     value = str(row[0]).strip() if pd.notna(row[0]) else ""
     link  = str(row[1]).strip() if pd.notna(row[1]) else ""
+
     if not value:
+        continue
+
+    if link in BLOCKED_DOC_IDS:
+        blocked_count += 1
+        continue
+
+    # Skip hardcoded IDs from normal processing — handled separately below
+    if link in SPECIFIC_ID_ROUTES:
         continue
 
     lvl = detect_skill_level(value)
     if lvl is None:
         continue
 
+    skill_key = f"Skill Level {lvl}"
+    entry     = make_entry(value, link)
+
     for equipment in equipment_names:
         if matches_equipment(value, equipment):
-            entry = make_entry(value, link)
-            bucket = equipment_skill_lists[equipment][f"Skill Level {lvl}"]
-            if entry not in bucket["list"]:  # de-dup
-                bucket["list"].append(entry)
-                bucket["count"] += 1
-                total_processed += 1
+            add_entry(equipment, skill_key, entry)
+            total_processed += 1
 
-print(f"✅ Total entries processed: {total_processed}")
+print(f"✅ Total entries matched by name : {total_processed}")
+print(f"🚫 Blocked entries               : {blocked_count}")
+
+# ---------------------------------------------------------------------------
+# INJECT HARDCODED LEVEL 3 IDs INTO ALL TABS
+# ---------------------------------------------------------------------------
+print("\n🔍 Injecting hardcoded Level 3 IDs into all tabs...")
+injected = 0
+
+for doc_id in SPECIFIC_ID_ROUTES:
+    # Try to find the title from Excel by doc ID
+    found_title = None
+    for row in data:
+        if len(row) < 2:
+            continue
+        title = str(row[0]).strip() if pd.notna(row[0]) else ""
+        link  = str(row[1]).strip() if pd.notna(row[1]) else ""
+        if link == doc_id:
+            found_title = title
+            break
+
+    if found_title:
+        entry = make_entry(found_title, doc_id)
+        for equipment in ALL_EQUIPMENT:
+            add_entry(equipment, "Skill Level 3", entry)
+        injected += 1
+        print(f"  ✅ Injected : {doc_id} → {found_title}")
+    else:
+        print(f"  ⚠️  ID not found in Excel : {doc_id}")
+
+print(f"📋 Hardcoded Level 3 injected : {injected}/{len(SPECIFIC_ID_ROUTES)} → all tabs")
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -133,15 +202,18 @@ detail_css = """
 body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; }
 .back-btn { display: inline-block; padding: 10px 20px; background-color: #08665c; color: white; text-decoration: none; border-radius: 5px; font-size: 14px; margin-bottom: 20px; transition: background-color 0.3s; }
 .back-btn:hover { background-color: #054a40; }
+h1 { font-size: 24px; color: #333; margin-bottom: 20px; }
 .data-table { border-collapse: collapse; width: 100%; font-size: 18px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); background-color: #fff; }
 .header-row { background-color: #f0f0f0; color: #333; font-weight: bold; }
 .header-row th { padding: 12px; text-align: left; }
 .skill-level { text-align: left; font-size: 16px; padding: 12px; border-bottom: 1px solid #ddd; white-space: nowrap; vertical-align: top; }
 .data-cell { text-align: left; font-size: 16px; padding: 12px; border-bottom: 1px solid #ddd; line-height: 1.5; }
 .data-cell:hover { background-color: #f0f0f0; }
+.data-cell a { color: #08665c; text-decoration: none; font-size: 16px; }
+.data-cell a:hover { color: #054a40; text-decoration: underline; }
 """
 
-# --- 3. MAIN DASHBOARD (MSP/MSP.html) ---
+# --- 3. MAIN DASHBOARD ---
 html = f"<html><head><style>{dashboard_css}</style></head><body>"
 html += "<div class='container'>"
 html += "<div class='header'><a href='../index.html' class='home-btn'>Return to Home</a></div>"
@@ -154,14 +226,12 @@ for equipment in equipment_names:
     html += f"<div class='post-it'><a href='MSP/{safe_filename}'>{equipment}</a></div>"
 
 html += "</div></div></div></div></body></html>"
-
 with open(os.path.join(main_folder, "MSP.html"), "w", encoding="utf-8") as file:
     print(BeautifulSoup(html, "html.parser").prettify(), file=file)
 
 # --- 4. INDIVIDUAL EQUIPMENT PAGES ---
 for equipment in equipment_names:
-    safe_filename = equipment.replace(" ", "_") + ".html"
-
+    safe_filename  = equipment.replace(" ", "_") + ".html"
     equipment_html = f"<html><head><style>{detail_css}</style></head><body>"
     equipment_html += "<a href='../MSP.html' class='back-btn'>← Back to Dashboard</a>"
     equipment_html += f"<h1>{equipment}</h1>"
@@ -172,9 +242,9 @@ for equipment in equipment_names:
     for i in range(1, 7):
         bucket = equipment_skill_lists[equipment][f"Skill Level {i}"]["list"]
         if bucket:
-            has_data = True
+            has_data      = True
             bucket_sorted = sorted(bucket, key=lambda x: x.lower())
-            content = "<br/><br/>".join(bucket_sorted)
+            content       = "<br/><br/>".join(bucket_sorted)
             equipment_html += (
                 f"<tr>"
                 f"<td class='skill-level'>{level_role_label(i)}</td>"
@@ -190,13 +260,12 @@ for equipment in equipment_names:
         )
 
     equipment_html += "</table></body></html>"
-
     with open(os.path.join(nested_folder, safe_filename), "w", encoding="utf-8") as file:
         print(BeautifulSoup(equipment_html, "html.parser").prettify(), file=file)
 
-print("\n✅ Structure Updated to Nested Folders:")
+print("\n✅ Processing Complete.")
 print("📁 Dashboard : MSP/MSP.html")
 print("📁 Pages     : MSP/MSP/[Equipment].html")
-print("📋 Column header : Level/Role")
-print("📋 Cell format   : Level 1 (Operator) / Level 3 (Technician)")
-print("📋 Peel Force Tester matching: 'peel' OR 'peel force tester'")
+print("📋 6 hardcoded Level 3 MSP docs routed by ID → all equipment tabs")
+print("📋 Normal rows matched by equipment keyword in title")
+print("📋 Sorting : Level (1-6), then document name A-Z")
