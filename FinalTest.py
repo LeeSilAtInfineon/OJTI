@@ -15,11 +15,13 @@ general_folder    = os.path.join(output_folder, "General")
 for folder in [output_folder, testers_folder, handlers_folder, automation_folder, general_folder]:
     os.makedirs(folder, exist_ok=True)
 
+# UPDATE THIS PATH TO YOUR EXCEL FILE
 excel_path = r"C:\\Users\\leesil\\Python Projects\\Git Branch\\Master\\OJTI\\export.xlsx"
 
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
 tester_names       = ["EXAScale", "V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "J750", "Flex"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT", "Rasco"]
+
 keywords = tester_names + handler_names + automation_names
 
 SKILL_ROLE = {
@@ -33,10 +35,6 @@ SKILL_ROLE = {
 
 def level_role_label(i: int) -> str:
     return f"Level {i} ({SKILL_ROLE.get(i, '')})"
-
-def norm(s: str) -> str:
-    """Normalize string for matching: uppercase and remove spaces/hyphens/underscores."""
-    return re.sub(r"[\s\-_]+", "", str(s).upper())
 
 SKILL_RE = re.compile(r"skill\s*level\s*[:\-]?\s*(\d)", re.IGNORECASE)
 
@@ -85,7 +83,7 @@ matched_links = set()
 HARDCODED_DOCS = {
     "Z8F46860675": {
         "title": "OJTI for IBIS Equipment Safe Release (ESR). (Skill Level 3)(TWI)",
-        "targets": ["ALL"],  # change if you want specific tabs only
+        "targets": ["ALL"],
         "skill": 3
     },
     "Z8F46861705": {
@@ -132,14 +130,54 @@ def add_to_general(lvl, entry):
     general_lists[f"Skill Level {lvl}"]["list"].append(entry)
     general_lists[f"Skill Level {lvl}"]["count"] += 1
 
+# ==========================================
+# KEYWORD MATCHING LOGIC
+# ==========================================
+
+# 1. Define Abbreviation Mappings
+# Add more here if needed (e.g., "DM": "Delta Matrix")
+ABBREV_MAP = {
+    "DC": "Delta Castle",
+    # "DM": "Delta Matrix",
+}
+
+# 2. Build Regex Patterns for Full Keywords
+def build_keyword_pattern(kw: str) -> re.Pattern:
+    """
+    Build a word-boundary-aware regex for a keyword.
+    - Supports multi-word keywords (e.g., 'Delta Castle')
+    - Uses word boundaries (\b) to prevent partial matches (e.g., 'DC' inside 'ADC')
+    """
+    escaped = re.escape(kw)
+    # Allow flexible separators (space, hyphen, underscore) between words in the keyword
+    escaped = re.sub(r'\\ ', r'[\\s\\-_]+', escaped)
+    # Use \b for word boundaries. Note: \b doesn't always work perfectly with regex special chars,
+    # so we use a lookbehind/lookahead for non-alphanumeric characters instead for safety.
+    pattern_str = r'(?<![A-Za-z0-9])' + escaped + r'(?![A-Za-z0-9])'
+    return re.compile(pattern_str, re.IGNORECASE)
+
+KEYWORD_PATTERNS = {kw: build_keyword_pattern(kw) for kw in keywords}
+
+# 3. Build Regex Pattern for Abbreviations
+# Matches standalone uppercase/acronym strings (2-4 chars) that are not part of a larger word
+ABBREV_RE = re.compile(r'(?<![A-Za-z0-9])([A-Z]{2,4})(?![A-Za-z0-9])')
+
+# ==========================================
+# EXECUTION
+# ==========================================
+
 print("🔄 Processing data...")
-total_processed   = 0
+total_processed     = 0
 debug_general_added = 0
+
+# Set to True if you want to see detailed logs of matches in the console
+DEBUG_MODE = False 
 
 # --- A) Normal keyword-based processing from Excel ---
 for row in data:
     if len(row) < 2:
         continue
+
     value = str(row[0]) if pd.notna(row[0]) else ""
     link  = str(row[1]) if pd.notna(row[1]) else ""
     col6  = str(row[5]) if (len(row) > 5 and pd.notna(row[5])) else ""
@@ -155,25 +193,44 @@ for row in data:
     if lvl is None:
         continue
 
-    value_norm = norm(value)
     entry = make_entry(value, link)
-
     matched_specific = False
 
-    # 1) Match Testers / Handlers / Automation
-    for kw in keywords:
-        if norm(kw) in value_norm:
-            add_to_keyword(kw, lvl, entry)
+    # 1) Check for Abbreviations First (e.g., "DC" -> "Delta Castle")
+    # Find all standalone acronyms in the title
+    found_abbrevs = set(ABBREV_RE.findall(value))
+    for abbr in found_abbrevs:
+        if abbr in ABBREV_MAP:
+            target_kw = ABBREV_MAP[abbr]
+            if DEBUG_MODE:
+                print(f"🔹 ABBREVIATION MATCH: '{abbr}' -> '{target_kw}' | Title: {value[:50]}...")
+            add_to_keyword(target_kw, lvl, entry)
             total_processed += 1
             matched_specific = True
             matched_links.add(link)
-            break
+            break # Matched one abbreviation, move to next row
 
     if matched_specific:
         continue
 
-    # 2) General: col6 must contain "testing" and not matched
+    # 2) Check for Full Keyword Matches (e.g., "Delta Castle")
+    for kw in keywords:
+        if KEYWORD_PATTERNS[kw].search(value):
+            if DEBUG_MODE:
+                print(f"🔹 KEYWORD MATCH: '{kw}' | Title: {value[:50]}...")
+            add_to_keyword(kw, lvl, entry)
+            total_processed += 1
+            matched_specific = True
+            matched_links.add(link)
+            break  # Remove this 'break' if you want a doc to appear in multiple tabs
+
+    if matched_specific:
+        continue
+
+    # 3) General: col6 must contain "testing" and not matched
     if "testing" in col6.lower() and link not in matched_links:
+        if DEBUG_MODE:
+            print(f"🔹 GENERAL MATCH (via col6) | Title: {value[:50]}...")
         add_to_general(lvl, entry)
         total_processed += 1
         debug_general_added += 1
@@ -261,6 +318,7 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
     html += f"<div class='header'><h1>{title}</h1>"
     html += f"<a href='{back_href}' class='back-btn header-btn'>← Back</a></div>"
     html += f"<table class='data-table'>{LEVEL_HEADER}"
+
     rows_found = False
     for i in range(1, 7):
         entries = skill_dict[f"Skill Level {i}"]["list"]
@@ -270,9 +328,12 @@ def write_detail_page(title, back_href, skill_dict, output_path, empty_msg):
                 f"<tr><td class='skill-level'>{level_role_label(i)}</td>"
                 f"<td class='data-cell'>{'<br/><br/>'.join(entries)}</td></tr>"
             )
+
     if not rows_found:
         html += f"<tr><td class='skill-level' colspan='2'>{empty_msg}</td></tr>"
+
     html += "</table></body></html>"
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(BeautifulSoup(html, "html.parser").prettify())
 
@@ -293,44 +354,88 @@ with open(os.path.join(output_folder, "FinalTest.html"), "w", encoding="utf-8") 
     f.write(BeautifulSoup(html_master, "html.parser").prettify())
 
 # --- TESTER LIST VIEW ---
-html_tester_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Testers</div><div class='main-content'><div class='post-it-container'>"
+html_tester_view = (
+    f"<html><head><style>{dashboard_css}</style></head><body>"
+    f"<div class='container'><div class='header'>"
+    f"<a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a>"
+    f"</div><div class='content'><div class='sidebar'>Testers</div>"
+    f"<div class='main-content'><div class='post-it-container'>"
+)
 for t in tester_names:
     html_tester_view += f"<div class='post-it'><a href='{t}.html'>{t}</a></div>"
 html_tester_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(testers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_tester_view, "html.parser").prettify())
 
 # --- HANDLER LIST VIEW ---
-html_handler_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Handlers</div><div class='main-content'><div class='post-it-container'>"
+html_handler_view = (
+    f"<html><head><style>{dashboard_css}</style></head><body>"
+    f"<div class='container'><div class='header'>"
+    f"<a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a>"
+    f"</div><div class='content'><div class='sidebar'>Handlers</div>"
+    f"<div class='main-content'><div class='post-it-container'>"
+)
 for h in handler_names:
     safe_name = h.replace(" ", "_")
     html_handler_view += f"<div class='post-it'><a href='{safe_name}.html'>{h}</a></div>"
 html_handler_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(handlers_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_handler_view, "html.parser").prettify())
 
 # --- AUTOMATION LIST VIEW ---
-html_auto_view = f"<html><head><style>{dashboard_css}</style></head><body><div class='container'><div class='header'><a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a></div><div class='content'><div class='sidebar'>Automation</div><div class='main-content'><div class='post-it-container'>"
+html_auto_view = (
+    f"<html><head><style>{dashboard_css}</style></head><body>"
+    f"<div class='container'><div class='header'>"
+    f"<a href='../FinalTest.html' class='back-btn header-btn'>← Back to Final Test</a>"
+    f"</div><div class='content'><div class='sidebar'>Automation</div>"
+    f"<div class='main-content'><div class='post-it-container'>"
+)
 for a in automation_names:
     safe_name = a.replace(" ", "_")
     html_auto_view += f"<div class='post-it'><a href='{safe_name}.html'>{a}</a></div>"
 html_auto_view += "</div></div></div></div></body></html>"
+
 with open(os.path.join(automation_folder, "view.html"), "w", encoding="utf-8") as f:
     f.write(BeautifulSoup(html_auto_view, "html.parser").prettify())
 
 # --- DETAIL PAGES ---
 for t in tester_names:
-    write_detail_page(t, "view.html", keyword_lists[t], os.path.join(testers_folder, f"{t}.html"),
-                      "No documents found for this Tester.")
+    write_detail_page(
+        t,
+        "view.html",
+        keyword_lists[t],
+        os.path.join(testers_folder, f"{t}.html"),
+        "No documents found for this Tester."
+    )
+
 for h in handler_names:
     safe_name = h.replace(" ", "_")
-    write_detail_page(h, "view.html", keyword_lists[h], os.path.join(handlers_folder, f"{safe_name}.html"),
-                      "No documents found for this Handler.")
+    write_detail_page(
+        h,
+        "view.html",
+        keyword_lists[h],
+        os.path.join(handlers_folder, f"{safe_name}.html"),
+        "No documents found for this Handler."
+    )
+
 for a in automation_names:
     safe_name = a.replace(" ", "_")
-    write_detail_page(a, "view.html", keyword_lists[a], os.path.join(automation_folder, f"{safe_name}.html"),
-                      "No documents found for this Automation Equipment.")
-write_detail_page("General", "../FinalTest.html", general_lists, os.path.join(general_folder, "view.html"),
-                  "No documents found for General.")
+    write_detail_page(
+        a,
+        "view.html",
+        keyword_lists[a],
+        os.path.join(automation_folder, f"{safe_name}.html"),
+        "No documents found for this Automation Equipment."
+    )
+
+write_detail_page(
+    "General",
+    "../FinalTest.html",
+    general_lists,
+    os.path.join(general_folder, "view.html"),
+    "No documents found for General."
+)
 
 print("\n✅ HTML generated.")
