@@ -24,11 +24,11 @@ else:
         data = []
 
 # --- 3. DEFINITIONS & EXCLUSION LISTS ---
-packing_equipment_names = ["DPL",]
+packing_equipment_names = ["DPL", "MVH"]
 
 ibis_names         = ["MGT", "Mirae", "Gen2", "Gen 3", "Gen 32"]
 keywords           = ["DPLP", "Subcon", "Shipping"]
-equipment_names    = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester"]
+equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel", "KLR", "McDry", "Despatch"]
 automation_names   = ["OHT", "AMR", "E-rack", "Strapping", "ASRS", "AMHS", "MMR", "Point to Point"]
 tester_names       = ["V93K", "LTX", "MMCI", "Advantest", "Ultraflex", "Rasco", "EXAScale", "J750"]
 handler_names      = ["North Star", "Delta Matrix", "Delta Castle", "OSAI", "Multitest", "JHT"]

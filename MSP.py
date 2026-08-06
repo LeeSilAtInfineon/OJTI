@@ -26,7 +26,8 @@ else:
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester", "KLR", "McDry", "Despatch"]
+# CHANGED: "Despatch" -> "Baking"
+equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester", "KLR", "McDry", "Baking"]
 ALL_EQUIPMENT   = equipment_names
 
 SKILL_ROLE = {
@@ -101,11 +102,24 @@ def add_entry(equipment, skill_level_key, entry):
 
 def matches_equipment(title: str, equipment: str) -> bool:
     t = str(title)
+    
+    # Special handling for "Peel Force Tester"
     if equipment.lower() == "peel force tester":
         return bool(
             re.search(r"\bpeel\b", t, flags=re.IGNORECASE) or
             re.search(r"\bpeel\s+force\s+tester\b", t, flags=re.IGNORECASE)
         )
+    
+    # Special handling for "Baking" (formerly Despatch)
+    # We check for "Baking" OR "Despatch" in the title so old titles still route correctly
+    if equipment.lower() == "baking":
+        return bool(
+            re.search(r"\bbaking\b", t, flags=re.IGNORECASE) or
+            re.search(r"\bdespatch\b", t, flags=re.IGNORECASE) or
+            re.search(r"\bdespatch\s+oven\b", t, flags=re.IGNORECASE)
+        )
+
+    # Default: Exact word match for other equipment
     return bool(re.search(rf"\b{re.escape(equipment)}\b", t, flags=re.IGNORECASE))
 
 # ---------------------------------------------------------------------------
@@ -120,28 +134,28 @@ blocked_count   = 0
 for row in data:
     if len(row) < 2:
         continue
-
+    
     value = str(row[0]).strip() if pd.notna(row[0]) else ""
     link  = str(row[1]).strip() if pd.notna(row[1]) else ""
-
+    
     if not value:
         continue
-
+    
     if link in BLOCKED_DOC_IDS:
         blocked_count += 1
         continue
-
+        
     # Skip hardcoded IDs from normal processing — handled separately below
     if link in SPECIFIC_ID_ROUTES:
         continue
-
+        
     lvl = detect_skill_level(value)
     if lvl is None:
         continue
-
+        
     skill_key = f"Skill Level {lvl}"
     entry     = make_entry(value, link)
-
+    
     for equipment in equipment_names:
         if matches_equipment(value, equipment):
             add_entry(equipment, skill_key, entry)
@@ -167,7 +181,7 @@ for doc_id in SPECIFIC_ID_ROUTES:
         if link == doc_id:
             found_title = title
             break
-
+            
     if found_title:
         entry = make_entry(found_title, doc_id)
         for equipment in ALL_EQUIPMENT:
@@ -226,6 +240,7 @@ for equipment in equipment_names:
     html += f"<div class='post-it'><a href='MSP/{safe_filename}'>{equipment}</a></div>"
 
 html += "</div></div></div></div></body></html>"
+
 with open(os.path.join(main_folder, "MSP.html"), "w", encoding="utf-8") as file:
     print(BeautifulSoup(html, "html.parser").prettify(), file=file)
 
@@ -237,7 +252,7 @@ for equipment in equipment_names:
     equipment_html += f"<h1>{equipment}</h1>"
     equipment_html += "<table class='data-table'>"
     equipment_html += LEVEL_HEADER
-
+    
     has_data = False
     for i in range(1, 7):
         bucket = equipment_skill_lists[equipment][f"Skill Level {i}"]["list"]
@@ -251,15 +266,16 @@ for equipment in equipment_names:
                 f"<td class='data-cell'>{content}</td>"
                 f"</tr>"
             )
-
+            
     if not has_data:
         equipment_html += (
             "<tr><td class='skill-level' colspan='2'>"
             "No documents found for this equipment."
             "</td></tr>"
         )
-
+        
     equipment_html += "</table></body></html>"
+    
     with open(os.path.join(nested_folder, safe_filename), "w", encoding="utf-8") as file:
         print(BeautifulSoup(equipment_html, "html.parser").prettify(), file=file)
 
