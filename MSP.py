@@ -33,9 +33,9 @@ ALL_EQUIPMENT   = equipment_names
 SKILL_ROLE = {
     1: "Operator",
     2: "Operator",
-    3: "Technician",
-    4: "Technician",
-    5: "Technician",
+    3: "Operator/Technician",
+    4: "Line Technician",
+    5: "PM Technician",
     6: "Technician",
 }
 
