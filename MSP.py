@@ -31,7 +31,7 @@ equipment_names = ["KLA", "SRM", "ISMECA", "TTM", "ETM", "Peel Force Tester", "K
 ALL_EQUIPMENT   = equipment_names
 
 SKILL_ROLE = {
-    1: "Operator",
+    1: "Operator/Technician",
     2: "Operator",
     3: "Operator/Technician",
     4: "Line Technician",

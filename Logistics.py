@@ -30,7 +30,7 @@ else:
 keywords = ["DPLP", "Subcon", "Shipping"]
 
 SKILL_ROLE = {
-    1: "Operator",
+    1: "Operator/Technician",
     2: "Operator",
     3: "Operator/Technician",
     4: "Line Technician",
